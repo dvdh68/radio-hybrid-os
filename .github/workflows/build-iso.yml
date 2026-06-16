@@ -108,7 +108,11 @@ jobs:
             local tmp
             tmp="$(mktemp -d)"
             trap 'rm -rf "$tmp"' RETURN
-            xorriso -indev "$iso" -find / -type f -print > "$tmp/files.txt" 2>/dev/null || fail "ISO konnte nicht gelesen werden."
+            if ! command -v xorriso >/dev/null 2>&1; then
+              apt-get update
+              apt-get install -y xorriso
+            fi
+            xorriso -indev "$iso" -find / -type f -- > "$tmp/files.txt" 2>/dev/null || fail "ISO konnte nicht gelesen werden."
             grep -Eiq '(/install[^/]*/|/debian-installer/|/d-i/|live-installer)' "$tmp/files.txt" || fail "Debian Installer fehlt in der ISO."
             xorriso -osirrox on -indev "$iso" -extract /isolinux "$tmp/isolinux" -extract /boot/grub "$tmp/grub" >/dev/null 2>&1 || true
             grep -Riq "Radio Hybrid OS live starten" "$tmp" || fail "Bootmenue-Eintrag fuer Live-Start fehlt."
