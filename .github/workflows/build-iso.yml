@@ -15,6 +15,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repository
@@ -30,10 +32,11 @@ jobs:
       - name: Generate live-build project
         run: |
           set -euo pipefail
-          mkdir -p auto scripts config/package-lists config/hooks/live config/includes.installer
+          mkdir -p auto scripts config/package-lists config/hooks/live config/binary_debian-installer
+          mkdir -p config/bootloaders/grub-pc config/bootloaders/syslinux_common
           mkdir -p config/includes.chroot/etc/live/config.conf.d config/includes.chroot/etc/lightdm/lightdm.conf.d config/includes.chroot/etc/lightdm/lightdm-gtk-greeter.conf.d
           mkdir -p config/includes.chroot/etc/skel/Desktop config/includes.chroot/usr/local/bin config/includes.chroot/usr/share/applications
-          mkdir -p config/includes.chroot/usr/share/icons/hicolor/scalable/apps config/includes.chroot/usr/share/radio-hybrid config/includes.chroot/usr/share/plymouth/themes/radio-hybrid
+          mkdir -p config/includes.chroot/usr/share/icons/hicolor/scalable/apps config/includes.chroot/usr/share/radio-hybrid
 
           cat > auto/config <<'EOF'
           #!/bin/sh
@@ -50,6 +53,7 @@ jobs:
             --debian-installer live \
             --debian-installer-distribution trixie \
             --debian-installer-gui true \
+            --debian-installer-preseedfile config/binary_debian-installer/preseed.cfg \
             --linux-flavours amd64 \
             --firmware-binary true \
             --firmware-chroot true \
@@ -75,11 +79,13 @@ jobs:
             --mirror-debian-installer "http://deb.debian.org/debian/" \
             "${@}"
           EOF
+
           cat > auto/build <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
           lb build noauto "${@}" 2>&1 | tee build.log
           EOF
+
           cat > auto/clean <<'EOF'
           #!/bin/sh
           set -e
@@ -87,6 +93,7 @@ jobs:
           rm -f build.log
           rm -rf dist
           EOF
+
           cat > scripts/check-requirements.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -95,6 +102,7 @@ jobs:
           done
           echo "OK: Build-Voraussetzungen vorhanden."
           EOF
+
           cat > clean.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -102,26 +110,42 @@ jobs:
           rm -f build.log
           rm -rf dist
           EOF
+
           cat > build.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
           ISO_OUTPUT="dist/radio-hybrid-os-amd64.iso"
           fail(){ echo "FEHLER: $*" >&2; exit 1; }
+
+          validate_iso(){
+            local iso="$1"
+            local tmp
+            tmp="$(mktemp -d)"
+            trap 'rm -rf "$tmp"' RETURN
+            xorriso -indev "$iso" -find / -type f -print > "$tmp/files.txt" 2>/dev/null || fail "ISO konnte nicht gelesen werden."
+            grep -Eiq '(^|/)(install|debian-installer)(/|\.)' "$tmp/files.txt" || fail "Debian Installer fehlt in der ISO."
+            xorriso -osirrox on -indev "$iso" -extract /isolinux "$tmp/isolinux" -extract /boot/grub "$tmp/grub" >/dev/null 2>&1 || true
+            grep -Riq "Radio Hybrid OS live starten" "$tmp" || fail "Bootmenue-Eintrag fuer Live-Start fehlt."
+            grep -Riq "Radio Hybrid OS installieren" "$tmp" || fail "Bootmenue-Eintrag fuer Installation fehlt."
+          }
+
           ./scripts/check-requirements.sh
           lb config
-          lb build
+          lb build 2>&1 | tee build.log
           mkdir -p dist
           iso_source=""
-          for candidate in live-image-amd64.hybrid.iso radio-hybrid-os-amd64.hybrid.iso radio-hybrid-os-amd64.iso; do
+          for candidate in radio-hybrid-os-amd64.hybrid.iso live-image-amd64.hybrid.iso radio-hybrid-os-amd64.iso live-image-amd64.iso; do
             [ -f "$candidate" ] && iso_source="$candidate" && break
           done
           [ -n "$iso_source" ] || fail "Keine ISO erzeugt. Siehe build.log."
+          validate_iso "$iso_source"
           cp -f "$iso_source" "$ISO_OUTPUT"
           sha256sum "$ISO_OUTPUT" > "${ISO_OUTPUT}.sha256"
           iso_size="$(stat -c%s "$ISO_OUTPUT")"
           [ "$iso_size" -gt 524288000 ] || fail "ISO ist kleiner als 500 MB: $iso_size Bytes."
           echo "Fertig: $ISO_OUTPUT"
           EOF
+
           cat > config/package-lists/base.list.chroot <<'EOF'
           live-boot
           live-config
@@ -151,6 +175,7 @@ jobs:
           pkexec
           lxpolkit
           EOF
+
           cat > config/package-lists/desktop.list.chroot <<'EOF'
           xserver-xorg
           xserver-xorg-input-libinput
@@ -171,9 +196,11 @@ jobs:
           adwaita-icon-theme
           papirus-icon-theme
           EOF
+
           cat > config/package-lists/browser.list.chroot <<'EOF'
           firefox-esr
           EOF
+
           cat > config/package-lists/hardware.list.chroot <<'EOF'
           network-manager
           network-manager-gnome
@@ -204,25 +231,30 @@ jobs:
           upower
           power-profiles-daemon
           EOF
+
           cat > config/package-lists/installer.list.chroot <<'EOF'
           debian-installer-launcher
           xterm
           efibootmgr
           os-prober
           EOF
+
           cat > config/package-lists/branding.list.chroot <<'EOF'
           plymouth
           plymouth-themes
           plymouth-label
           EOF
+
           cat > config/includes.chroot/etc/hostname <<'EOF'
           radio-hybrid
           EOF
+
           cat > config/includes.chroot/etc/hosts <<'EOF'
           127.0.0.1 localhost
           127.0.1.1 radio-hybrid
           ::1 localhost ip6-localhost ip6-loopback
           EOF
+
           cat > config/includes.chroot/etc/os-release <<'EOF'
           PRETTY_NAME="Radio Hybrid OS 1.0 (Debian 13 trixie Live)"
           NAME="Radio Hybrid OS"
@@ -232,6 +264,7 @@ jobs:
           ID=debian
           ID_LIKE=debian
           EOF
+
           cat > config/includes.chroot/etc/live/config.conf.d/10-radio-hybrid-user.conf <<'EOF'
           LIVE_USERNAME="radio"
           LIVE_USER_FULLNAME="Radio Hybrid"
@@ -241,6 +274,7 @@ jobs:
           LIVE_KEYBOARD_LAYOUTS="de"
           LIVE_USER_DEFAULT_GROUPS="audio cdrom dip floppy video plugdev netdev powerdev scanner bluetooth sudo"
           EOF
+
           cat > config/includes.chroot/etc/lightdm/lightdm.conf.d/50-radio-hybrid.conf <<'EOF'
           [Seat:*]
           greeter-session=lightdm-gtk-greeter
@@ -248,6 +282,7 @@ jobs:
           autologin-user=radio
           autologin-user-timeout=0
           EOF
+
           cat > config/includes.chroot/etc/lightdm/lightdm-gtk-greeter.conf.d/50-radio-hybrid.conf <<'EOF'
           [greeter]
           background=#111827
@@ -255,6 +290,7 @@ jobs:
           icon-theme-name=Papirus
           font-name=Noto Sans 11
           EOF
+
           cat > config/includes.chroot/usr/local/bin/radio-hybrid <<'EOF'
           #!/bin/sh
           APP_URL="file:///usr/share/radio-hybrid/index.html"
@@ -262,9 +298,11 @@ jobs:
           if command -v firefox-esr >/dev/null 2>&1; then exec firefox-esr --new-window "$APP_URL"; fi
           exec xdg-open "$APP_URL"
           EOF
+
           cat > config/includes.chroot/usr/share/radio-hybrid/index.html <<'EOF'
           <!doctype html><html lang="de"><head><meta charset="utf-8"><title>Radio Hybrid</title><style>body{font-family:sans-serif;background:#0f172a;color:#f8fafc;margin:40px}input,button{font:inherit;padding:10px;margin:4px}audio{width:100%;max-width:720px}</style></head><body><h1>Radio Hybrid</h1><p>Lokale Web-App fuer Radio-Streams.</p><input id="u" placeholder="Stream-URL" size="60"><button onclick="a.src=u.value;a.play()">Starten</button><p><audio id="a" controls></audio></p></body></html>
           EOF
+
           cat > config/includes.chroot/usr/share/applications/radio-hybrid.desktop <<'EOF'
           [Desktop Entry]
           Type=Application
@@ -275,6 +313,7 @@ jobs:
           Categories=AudioVideo;Network;
           EOF
           cp config/includes.chroot/usr/share/applications/radio-hybrid.desktop config/includes.chroot/etc/skel/Desktop/radio-hybrid.desktop
+
           cat > config/includes.chroot/usr/share/applications/radio-hybrid-install.desktop <<'EOF'
           [Desktop Entry]
           Type=Application
@@ -285,10 +324,12 @@ jobs:
           Categories=System;
           EOF
           cp config/includes.chroot/usr/share/applications/radio-hybrid-install.desktop config/includes.chroot/etc/skel/Desktop/radio-hybrid-install.desktop
+
           cat > config/includes.chroot/usr/share/icons/hicolor/scalable/apps/radio-hybrid.svg <<'EOF'
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#111827"/><circle cx="64" cy="64" r="42" fill="#38bdf8"/><text x="64" y="75" text-anchor="middle" font-size="32" font-family="sans-serif" font-weight="700" fill="#06111f">RH</text></svg>
           EOF
-          cat > config/includes.installer/preseed.cfg <<'EOF'
+
+          cat > config/binary_debian-installer/preseed.cfg <<'EOF'
           d-i debian-installer/locale string de_DE.UTF-8
           d-i keyboard-configuration/xkb-keymap select de
           d-i time/zone string Europe/Berlin
@@ -296,32 +337,125 @@ jobs:
           d-i apt-setup/non-free boolean true
           d-i apt-setup/non-free-firmware boolean true
           EOF
+
+          cat > config/bootloaders/grub-pc/grub.cfg <<'EOF'
+          source /boot/grub/config.cfg
+
+          menuentry 'Radio Hybrid OS live starten' --hotkey=l {
+            linux @KERNEL_LIVE@ @APPEND_LIVE@
+            initrd @INITRD_LIVE@
+          }
+
+          if @ENABLE_INSTALL_MENU@; then
+            menuentry 'Radio Hybrid OS installieren' --hotkey=i {
+              linux @KERNEL_GI@ vga=788 @APPEND_INSTALL@ --- quiet
+              initrd @INITRD_GI@
+            }
+            submenu 'Erweiterte Installationsoptionen ...' --hotkey=a {
+              source /boot/grub/theme.cfg
+              source /boot/grub/install.cfg
+            }
+          fi
+
+          submenu 'Utilities...' --hotkey=u {
+            source /boot/grub/theme.cfg
+            if @ENABLE_VERIFY_CHECKSUMS@; then
+              menuentry 'Verify integrity of the boot medium' --hotkey=v {
+                linux @KERNEL_LIVE@ @APPEND_VERIFY_CHECKSUMS@
+                initrd @INITRD_LIVE@
+              }
+            fi
+            if [ "${grub_platform}" = "efi" ]; then
+              menuentry 'UEFI Firmware Settings' --hotkey=f {
+                fwsetup
+              }
+            fi
+          }
+          EOF
+
+          cat > config/bootloaders/syslinux_common/menu.cfg <<'EOF'
+          menu hshift 0
+          menu width 82
+          menu title Radio Hybrid OS
+          include stdmenu.cfg
+          include live.cfg
+          @OPTIONAL_INSTALLER_INCLUDE@
+          menu begin utilities
+            menu label Utilities
+            menu title Utilities
+            include stdmenu.cfg
+            label mainmenu
+              menu label Back..
+              menu exit
+            include utilities.cfg
+          menu end
+          menu clear
+          EOF
+
+          cat > config/bootloaders/syslinux_common/live.cfg.in <<'EOF'
+          label live-@FLAVOUR@
+            menu label Radio Hybrid OS live starten
+            menu default
+            linux @LINUX@
+            initrd @INITRD@
+            append @APPEND_LIVE@
+
+          label live-@FLAVOUR@-failsafe
+            menu label Radio Hybrid OS live starten (abgesicherter Modus)
+            linux @LINUX@
+            initrd @INITRD@
+            append @APPEND_LIVE_FAILSAFE@
+          EOF
+
+          cat > config/bootloaders/syslinux_common/install_gui.cfg <<'EOF'
+          label installstart
+            menu label Radio Hybrid OS installieren
+            linux @KERNEL_GI@
+            initrd @INITRD_GI@
+            append vga=788 @APPEND_INSTALL@ --- quiet
+
+          menu begin install
+            menu label Erweiterte Installationsoptionen
+            menu title Erweiterte Installationsoptionen
+            include stdmenu.cfg
+            label mainmenu
+              menu label Back..
+              menu exit
+
+            label installgui
+              menu label Installieren
+              linux @KERNEL_GI@
+              initrd @INITRD_GI@
+              append vga=788 @APPEND_INSTALL@ --- quiet
+
+            label installtext
+              menu label Text-Installer
+              linux @KERNEL_DI@
+              initrd @INITRD_DI@
+              append vga=788 @APPEND_INSTALL@ --- quiet
+
+            label rescuegui
+              menu label Rettungsmodus
+              linux @KERNEL_GI@
+              initrd @INITRD_GI@
+              append rescue/enable=true vga=788 @APPEND_INSTALL@ --- quiet
+          menu end
+          EOF
+
           cat > config/hooks/live/9000-branding.hook.chroot <<'EOF'
           #!/bin/sh
           set -e
           chmod 755 /usr/local/bin/radio-hybrid /etc/skel/Desktop/*.desktop
           chmod 644 /usr/share/applications/*.desktop
           EOF
+
           cat > config/hooks/live/9100-services.hook.chroot <<'EOF'
           #!/bin/sh
           set -e
           systemctl enable NetworkManager bluetooth lightdm || true
           systemctl --global enable pipewire.service pipewire-pulse.service wireplumber.service || true
           EOF
-          cat > config/hooks/live/9400-boot-menu.hook.binary <<'EOF'
-          #!/bin/sh
-          set -e
-          find binary -type f \( -name '*.cfg' -o -name '*.txt' \) -print | while read -r file; do
-            sed -i -e 's/menu label .*Live.*/menu label Radio Hybrid OS live starten/g' -e 's/menu label .*Install.*/menu label Radio Hybrid OS installieren/g' -e 's/menuentry ".*[Ll]ive.*"/menuentry "Radio Hybrid OS live starten"/g' -e 's/menuentry ".*[Ii]nstall.*"/menuentry "Radio Hybrid OS installieren"/g' "$file" || true
-          done
-          EOF
-          cat > config/hooks/live/9500-installer-check.hook.binary <<'EOF'
-          #!/bin/sh
-          set -e
-          find binary -type f \( -path '*/install.*/*' -o -path '*/debian-installer/*' -o -path '*/d-i/*' \) | grep -q . || { echo "FEHLER: Debian Installer fehlt in der ISO." >&2; exit 1; }
-          grep -Riq "install" binary/isolinux binary/boot binary/EFI 2>/dev/null || { echo "FEHLER: Installer-Eintrag fehlt im Bootmenue." >&2; exit 1; }
-          echo "OK: installierbare ISO mit Debian Installer."
-          EOF
+
           chmod +x auto/* scripts/*.sh *.sh config/hooks/live/* config/includes.chroot/usr/local/bin/radio-hybrid
 
       - name: Check build requirements
