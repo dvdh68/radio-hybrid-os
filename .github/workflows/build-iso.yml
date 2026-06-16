@@ -65,7 +65,7 @@ jobs:
             --memtest none \
             --win32-loader false \
             --source false \
-            --image-name radio-hybrid-os-amd64 \
+            --image-name radio-hybrid-os \
             --iso-application "Radio Hybrid OS Live" \
             --iso-publisher "Radio Hybrid" \
             --iso-volume "RADIO_HYBRID" \
@@ -78,20 +78,6 @@ jobs:
             --mirror-binary-security "http://security.debian.org/debian-security/" \
             --mirror-debian-installer "http://deb.debian.org/debian/" \
             "${@}"
-          EOF
-
-          cat > auto/build <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          lb build noauto "${@}" 2>&1 | tee build.log
-          EOF
-
-          cat > auto/clean <<'EOF'
-          #!/bin/sh
-          set -e
-          lb clean noauto --purge "${@}" || true
-          rm -f build.log
-          rm -rf dist
           EOF
 
           cat > scripts/check-requirements.sh <<'EOF'
@@ -123,7 +109,7 @@ jobs:
             tmp="$(mktemp -d)"
             trap 'rm -rf "$tmp"' RETURN
             xorriso -indev "$iso" -find / -type f -print > "$tmp/files.txt" 2>/dev/null || fail "ISO konnte nicht gelesen werden."
-            grep -Eiq '(^|/)(install|debian-installer)(/|\.)' "$tmp/files.txt" || fail "Debian Installer fehlt in der ISO."
+            grep -Eiq '(/install[^/]*/|/debian-installer/|/d-i/|live-installer)' "$tmp/files.txt" || fail "Debian Installer fehlt in der ISO."
             xorriso -osirrox on -indev "$iso" -extract /isolinux "$tmp/isolinux" -extract /boot/grub "$tmp/grub" >/dev/null 2>&1 || true
             grep -Riq "Radio Hybrid OS live starten" "$tmp" || fail "Bootmenue-Eintrag fuer Live-Start fehlt."
             grep -Riq "Radio Hybrid OS installieren" "$tmp" || fail "Bootmenue-Eintrag fuer Installation fehlt."
@@ -133,10 +119,7 @@ jobs:
           lb config
           lb build 2>&1 | tee build.log
           mkdir -p dist
-          iso_source=""
-          for candidate in radio-hybrid-os-amd64.hybrid.iso live-image-amd64.hybrid.iso radio-hybrid-os-amd64.iso live-image-amd64.iso; do
-            [ -f "$candidate" ] && iso_source="$candidate" && break
-          done
+          iso_source="$(find . -maxdepth 1 -type f \( -name '*.hybrid.iso' -o -name '*.iso' \) | sort | head -n 1)"
           [ -n "$iso_source" ] || fail "Keine ISO erzeugt. Siehe build.log."
           validate_iso "$iso_source"
           cp -f "$iso_source" "$ISO_OUTPUT"
@@ -146,7 +129,7 @@ jobs:
           echo "Fertig: $ISO_OUTPUT"
           EOF
 
-          cat > config/package-lists/base.list.chroot <<'EOF'
+          cat > config/package-lists/radio-hybrid.list.chroot <<'EOF'
           live-boot
           live-config
           live-config-systemd
@@ -174,9 +157,6 @@ jobs:
           polkitd
           pkexec
           lxpolkit
-          EOF
-
-          cat > config/package-lists/desktop.list.chroot <<'EOF'
           xserver-xorg
           xserver-xorg-input-libinput
           xserver-xorg-video-all
@@ -195,13 +175,7 @@ jobs:
           fonts-noto-core
           adwaita-icon-theme
           papirus-icon-theme
-          EOF
-
-          cat > config/package-lists/browser.list.chroot <<'EOF'
           firefox-esr
-          EOF
-
-          cat > config/package-lists/hardware.list.chroot <<'EOF'
           network-manager
           network-manager-gnome
           wpasupplicant
@@ -230,16 +204,10 @@ jobs:
           acpid
           upower
           power-profiles-daemon
-          EOF
-
-          cat > config/package-lists/installer.list.chroot <<'EOF'
           debian-installer-launcher
           xterm
           efibootmgr
           os-prober
-          EOF
-
-          cat > config/package-lists/branding.list.chroot <<'EOF'
           plymouth
           plymouth-themes
           plymouth-label
@@ -456,7 +424,7 @@ jobs:
           systemctl --global enable pipewire.service pipewire-pulse.service wireplumber.service || true
           EOF
 
-          chmod +x auto/* scripts/*.sh *.sh config/hooks/live/* config/includes.chroot/usr/local/bin/radio-hybrid
+          chmod +x scripts/*.sh *.sh config/hooks/live/* config/includes.chroot/usr/local/bin/radio-hybrid
 
       - name: Check build requirements
         run: ./scripts/check-requirements.sh
