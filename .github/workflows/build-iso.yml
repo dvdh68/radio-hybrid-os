@@ -3,8 +3,7 @@ name: Build Radio Hybrid OS ISO
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build-iso:
@@ -76,13 +75,11 @@ jobs:
             --mirror-debian-installer "http://deb.debian.org/debian/" \
             "${@}"
           EOF
-
           cat > auto/build <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
           lb build noauto "${@}" 2>&1 | tee build.log
           EOF
-
           cat > auto/clean <<'EOF'
           #!/bin/sh
           set -e
@@ -90,31 +87,24 @@ jobs:
           rm -f build.log
           rm -rf dist
           EOF
-
           cat > scripts/check-requirements.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
           for cmd in lb debootstrap mksquashfs xorriso isohybrid mcopy mkfs.vfat qemu-system-x86_64; do
             command -v "$cmd" >/dev/null 2>&1 || { echo "FEHLER: $cmd fehlt." >&2; exit 1; }
           done
-          free_kb="$(df -Pk . | awk 'NR==2 {print $4}')"
-          [ "${free_kb:-0}" -gt 8388608 ] || { echo "FEHLER: Zu wenig Speicherplatz fuer den ISO-Build." >&2; exit 1; }
           echo "OK: Build-Voraussetzungen vorhanden."
           EOF
-
           cat > clean.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
-          cd "$(dirname "$0")"
           lb clean --purge || true
           rm -f build.log
           rm -rf dist
           EOF
-
           cat > build.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
-          cd "$(dirname "$0")"
           ISO_OUTPUT="dist/radio-hybrid-os-amd64.iso"
           fail(){ echo "FEHLER: $*" >&2; exit 1; }
           ./scripts/check-requirements.sh
@@ -132,7 +122,6 @@ jobs:
           [ "$iso_size" -gt 524288000 ] || fail "ISO ist kleiner als 500 MB: $iso_size Bytes."
           echo "Fertig: $ISO_OUTPUT"
           EOF
-
           cat > config/package-lists/base.list.chroot <<'EOF'
           live-boot
           live-config
@@ -162,7 +151,6 @@ jobs:
           pkexec
           lxpolkit
           EOF
-
           cat > config/package-lists/desktop.list.chroot <<'EOF'
           xserver-xorg
           xserver-xorg-input-libinput
@@ -183,11 +171,9 @@ jobs:
           adwaita-icon-theme
           papirus-icon-theme
           EOF
-
           cat > config/package-lists/browser.list.chroot <<'EOF'
           firefox-esr
           EOF
-
           cat > config/package-lists/hardware.list.chroot <<'EOF'
           network-manager
           network-manager-gnome
@@ -218,22 +204,17 @@ jobs:
           upower
           power-profiles-daemon
           EOF
-
           cat > config/package-lists/installer.list.chroot <<'EOF'
           debian-installer-launcher
           xterm
-          grub-pc
-          grub-efi-amd64
           efibootmgr
           os-prober
           EOF
-
           cat > config/package-lists/branding.list.chroot <<'EOF'
           plymouth
           plymouth-themes
           plymouth-label
           EOF
-
           cat > config/includes.chroot/etc/hostname <<'EOF'
           radio-hybrid
           EOF
@@ -274,7 +255,6 @@ jobs:
           icon-theme-name=Papirus
           font-name=Noto Sans 11
           EOF
-
           cat > config/includes.chroot/usr/local/bin/radio-hybrid <<'EOF'
           #!/bin/sh
           APP_URL="file:///usr/share/radio-hybrid/index.html"
@@ -308,20 +288,6 @@ jobs:
           cat > config/includes.chroot/usr/share/icons/hicolor/scalable/apps/radio-hybrid.svg <<'EOF'
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#111827"/><circle cx="64" cy="64" r="42" fill="#38bdf8"/><text x="64" y="75" text-anchor="middle" font-size="32" font-family="sans-serif" font-weight="700" fill="#06111f">RH</text></svg>
           EOF
-          cat > config/includes.chroot/usr/share/plymouth/themes/radio-hybrid/radio-hybrid.plymouth <<'EOF'
-          [Plymouth Theme]
-          Name=Radio Hybrid
-          Description=Radio Hybrid OS boot splash
-          ModuleName=script
-          [script]
-          ImageDir=/usr/share/plymouth/themes/radio-hybrid
-          ScriptFile=/usr/share/plymouth/themes/radio-hybrid/radio-hybrid.script
-          EOF
-          cat > config/includes.chroot/usr/share/plymouth/themes/radio-hybrid/radio-hybrid.script <<'EOF'
-          Window.SetBackgroundTopColor(0.02,0.05,0.09);
-          Window.SetBackgroundBottomColor(0,0.01,0.03);
-          image=Image.Text("Radio Hybrid OS",1,1,1); sprite=Sprite(image); sprite.SetX(Window.GetWidth()/2-image.GetWidth()/2); sprite.SetY(Window.GetHeight()/2-image.GetHeight()/2);
-          EOF
           cat > config/includes.installer/preseed.cfg <<'EOF'
           d-i debian-installer/locale string de_DE.UTF-8
           d-i keyboard-configuration/xkb-keymap select de
@@ -330,15 +296,11 @@ jobs:
           d-i apt-setup/non-free boolean true
           d-i apt-setup/non-free-firmware boolean true
           EOF
-
           cat > config/hooks/live/9000-branding.hook.chroot <<'EOF'
           #!/bin/sh
           set -e
           chmod 755 /usr/local/bin/radio-hybrid /etc/skel/Desktop/*.desktop
           chmod 644 /usr/share/applications/*.desktop
-          plymouth-set-default-theme radio-hybrid || true
-          plymouth-set-default-theme -R radio-hybrid || true
-          update-initramfs -u || true
           EOF
           cat > config/hooks/live/9100-services.hook.chroot <<'EOF'
           #!/bin/sh
@@ -360,7 +322,6 @@ jobs:
           grep -Riq "install" binary/isolinux binary/boot binary/EFI 2>/dev/null || { echo "FEHLER: Installer-Eintrag fehlt im Bootmenue." >&2; exit 1; }
           echo "OK: installierbare ISO mit Debian Installer."
           EOF
-
           chmod +x auto/* scripts/*.sh *.sh config/hooks/live/* config/includes.chroot/usr/local/bin/radio-hybrid
 
       - name: Check build requirements
