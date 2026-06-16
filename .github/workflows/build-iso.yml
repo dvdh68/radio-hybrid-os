@@ -424,7 +424,7 @@ jobs:
           systemctl --global enable pipewire.service pipewire-pulse.service wireplumber.service || true
           EOF
 
-          chmod +x scripts/*.sh *.sh config/hooks/live/* config/includes.chroot/usr/local/bin/radio-hybrid
+          chmod +x auto/* scripts/*.sh *.sh config/hooks/live/* config/includes.chroot/usr/local/bin/radio-hybrid
 
       - name: Check build requirements
         run: ./scripts/check-requirements.sh
